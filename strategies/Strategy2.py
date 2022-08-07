@@ -276,7 +276,7 @@ class Strategy2:
         if order_win:
             p_l = self.cfg["trade"]["take_profit_value"]
         else:
-            p_l = self.cfg["trade"]["risk"]
+            p_l = -self.cfg["trade"]["risk"]
 
         line = [self.cfg["time"],
                 self.cfg["instrument"],
