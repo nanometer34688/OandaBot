@@ -14,7 +14,6 @@ import datetime
 from oandapyV20.definitions.orders import TimeInForce
 
 import argparse
-import top_performers
 
 from strategies.Strategy1 import Strategy1
 from strategies.Strategy2 import Strategy2
@@ -25,7 +24,6 @@ class Oanda:
     def __init__(self, access_token, debug=False):
         self.client = oandapyV20.API(access_token=access_token)
         self.accountID = ""
-        self.current_time = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None).isoformat() + 'Z'
         self.debug = debug
 
     def choose_account(self):
@@ -49,6 +47,11 @@ class Oanda:
 
     def get_open_trades(self):
         r = trades.OpenTrades(accountID=self.accountID)
+        rv = self.client.request(r)
+        return rv
+
+    def get_all_orders(self):
+        r = orders.OrderList(accountID=self.accountID)
         rv = self.client.request(r)
         return rv
 
@@ -115,6 +118,7 @@ class Oanda:
         return details["account"]["marginAvailable"]
 
     def replace_order(self, orderID, data):
+        print(self.accountID, orderID, data)
         r = orders.OrderReplace(accountID=self.accountID, orderID=orderID, data=data)
         return self.client.request(r)
 
@@ -191,10 +195,9 @@ api = Oanda(access_token)
 api.choose_account()
 instrument = args["instrument"]
 
-#api.close_all_open_orders()
+
 s2 = Strategy2(oanda_api=api, instrument=instrument)
-trend = s2.begin_trade()
-print(trend)
+s2.begin_trade()
 exit()
 
 if args["trading"]:
