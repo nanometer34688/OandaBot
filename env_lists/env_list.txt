@@ -1,0 +1,3 @@
+TRADING_TYPE=1 # Trading = 1, Testing = 2
+STRATEGY=2
+#INSTRUMENT=AUD_CAD
