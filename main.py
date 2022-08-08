@@ -10,7 +10,6 @@ from oandapyV20.contrib.requests import (
 import oandapyV20.endpoints.pricing as pricing
 import oandapyV20.endpoints.trades as trades
 import oandapyV20.endpoints.instruments as instruments
-import datetime
 from oandapyV20.definitions.orders import TimeInForce
 
 import argparse
@@ -55,11 +54,12 @@ class Oanda:
         rv = self.client.request(r)
         return rv
 
-    def get_price_history(self, from_time, instrument, granularity="H1"):
+    def get_price_history(self, from_time, instrument, granularity="H1", num_candles=500):
         params = {
             "from": from_time,  # "2005-01-01T00:00:00Z",
             "granularity": granularity,
             "includeFirst": True,
+            "count":num_candles
         }
         r = instruments.InstrumentsCandles(instrument=instrument, params=params)
         response = self.client.request(r)

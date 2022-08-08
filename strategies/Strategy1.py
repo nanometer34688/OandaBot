@@ -42,11 +42,12 @@ class Strategy1:
 
     def recalculate_price_history(self):
         # History Prices
-        ts_epoch = int(time.time()) - (self.time_frame * (5*self.ema_length))
+        ts_epoch = int(time.time()) - (self.time_frame * (self.ema_length))
         ts = datetime.datetime.fromtimestamp(ts_epoch).strftime('%Y-%m-%dT%H:%M:%SZ')
         self.price_history = self.oanda.get_price_history(from_time=ts,
                                                           instrument=self.instrument,
-                                                          granularity=self.granularity)
+                                                          granularity=self.granularity,
+                                                          num_candles=5000)
         self.prices = []
         for price in self.price_history["candles"]:
             self.prices.append(float(price["mid"]["c"]))
