@@ -27,7 +27,7 @@ class Strategy2:
 
         self.time_frame = 5 * 60
         self.trading_open = 6    # Operate trading between 06:00 - 11:00
-        self.trading_close = 11  # Operate trading between 06:00 - 11:00
+        self.trading_close = 21  # Operate trading between 06:00 - 11:00
 
 
         # Trade quantity
@@ -36,7 +36,7 @@ class Strategy2:
         self.take_profit_ratio = 1.5
 
         # Setting up config for print/debug
-        self.cfg = {"instrument": self.instrument,
+        self.cfg = {"instrument": instrument,
                     "risk": self.risk,
                     "pip_value": self.pip_value}
 
@@ -44,7 +44,7 @@ class Strategy2:
         base_currency = self.instrument.split("_")[0]
         if "GBP" in self.instrument:
             self.cfg["GBP_Value"] = 1
-            return 1/current_price
+            return float(1/current_price)
         else:
             new_instrument = "GBP_" + base_currency
             ts_epoch = int(time.time()) - (60*60+120)  # Get last 2 candles. It is an hour behind
@@ -63,7 +63,8 @@ class Strategy2:
     def get_candle_history(self):
         ts_epoch = int(time.time()) - (self.time_frame * (5000))
         ts = datetime.datetime.fromtimestamp(ts_epoch).strftime('%Y-%m-%dT%H:%M:%SZ')
-        self.cfg["time"] = ts
+        current_time = datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%dT%H:%M:%SZ')
+        self.cfg["time"] = current_time
         candles = self.oanda.get_price_history(ts, self.instrument, granularity="M5", num_candles=5000)
         return candles
 
@@ -137,17 +138,17 @@ class Strategy2:
         for price in history_prices["candles"]:
             prices.append(float(price["mid"]["c"]))
         RSI_PRICES = self.calculate_RSI(prices)
-        rsi_trend = self.get_trend(RSI_PRICES, -3)
+        rsi_trend = self.get_trend(RSI_PRICES, -2)
         if rsi_trend == "UPTREND" and RSI_PRICES[-1] > 50:
             self.cfg["RSI"] = {"RSI": RSI_PRICES[-10:],
-                               "TREND": "UPTREND"}
+                               "TREND": rsi_trend}
             return "UPTREND"
         elif rsi_trend == "DOWNTREND" and RSI_PRICES[-1] < 50:
             self.cfg["RSI"] = {"RSI": RSI_PRICES[-10:],
-                               "TREND": "DOWNTREND"}
+                               "TREND": rsi_trend}
             return "DOWNTREND"
         self.cfg["RSI"] = {"RSI": RSI_PRICES[-10:],
-                           "TREND": "NO TREND"}
+                           "TREND": rsi_trend}
         return False
 
     def calculate_engulfing_candle(self, history_prices):
@@ -183,18 +184,16 @@ class Strategy2:
         engulfing_candle = self.calculate_engulfing_candle(history_candle_prices)
         smma_trend = self.get_smma_trend(prices)
         stop_loss_difference = self.calculate_stop_loss_difference(history_candle_prices)
+
         risk = int(float(self.oanda.get_account_value()) * float(self.risk / 100))
 
         order = None
         self.cfg["price"] = prices[-1]
         if engulfing_candle == "BUY" and self.get_rsi_trend() == "UPTREND" and smma_trend == "UPTREND" and prices[-1] > self.smma200[-1]:
             price = float(tick["asks"][0]["price"])
-            stop_loss = price - stop_loss_difference
-            take_profit = price - (stop_loss_difference * self.take_profit_ratio)
-            gbp_exchange = self.calculate_gbp_value(price)
-            gbp_value = gbp_exchange * price
-            pips = (1 / (abs(stop_loss - price)))
-            units = int(gbp_value * risk * pips)
+            stop_loss = float(tick["bids"][0]["price"]) - stop_loss_difference
+            take_profit = float(tick["asks"][0]["price"]) + (abs(price - stop_loss) * self.take_profit_ratio)
+            units = int((risk / abs(stop_loss - price)) * price)
             if "JPY" in self.instrument:
                 take_profit = "{:.3f}".format(take_profit)
                 stop_loss = "{:.3f}".format(stop_loss)
@@ -219,12 +218,9 @@ class Strategy2:
 
         elif engulfing_candle == "SELL" and self.get_rsi_trend() == "DOWNTREND" and smma_trend == "DOWNTREND" and prices[-1] < self.smma200[-1]:
             price = float(tick["bids"][0]["price"])
-            stop_loss = price + stop_loss_difference
-            take_profit = price - (stop_loss_difference * self.take_profit_ratio)
-            gbp_exchange = self.calculate_gbp_value(price)
-            gbp_value = gbp_exchange * price
-            pips = (1 / (abs(stop_loss - price)))
-            units = int(gbp_value * risk * pips)
+            stop_loss = float(tick["asks"][0]["price"]) + stop_loss_difference
+            take_profit = float(tick["bids"][0]["price"]) - (abs(price - stop_loss) * self.take_profit_ratio)
+            units = int((risk / abs(stop_loss - price)) * price)
             if "JPY" in self.instrument:
                 take_profit = "{:.3f}".format(take_profit)
                 stop_loss = "{:.3f}".format(stop_loss)
@@ -273,7 +269,7 @@ class Strategy2:
                     trading = True
 
     def save_trade(self, order_win):
-        save_file = "trades.csv"
+        save_file = "trades/trades.csv"
         headers = ["Time", "Instrument", "Price", "Take Profit", "Stop Loss", "Units", "Decision", "P/L"]
         if order_win:
             p_l = self.cfg["trade"]["take_profit_value"]
@@ -281,7 +277,7 @@ class Strategy2:
             p_l = -self.cfg["trade"]["risk"]
 
         line = [self.cfg["time"],
-                self.cfg["instrument"],
+                self.instrument,
                 self.cfg["trade"]["price"],
                 self.cfg["trade"]["take_profit"],
                 self.cfg["trade"]["stop_loss"],
@@ -296,18 +292,29 @@ class Strategy2:
             writer.writerow(line)
 
 
-
     def calculate_stop_loss_difference(self, history_candle_prices, rate=2):
-        # Gets high and low price of previous candle
+        # Gets high and low price of previous candle - Maybe if too small, take the abg of the last 5 candles?
         high_price = float(history_candle_prices["candles"][-2]["mid"]["o"])
         low_price = float(history_candle_prices["candles"][-2]["mid"]["c"])
-        return float(abs(high_price - low_price)) * rate
+        stop_loss_difference = float(abs(high_price - low_price)) * rate
+        if stop_loss_difference < float( 2/self.pip_value):
+            return self.get_avg_moving_candles(history_candle_prices) * 2
+        return stop_loss_difference
 
+    def get_avg_moving_candles(self, history_candle_prices):
+        avg_prices = []
+        num_to_avg = 5
+        for x in range(num_to_avg):
+            open = float(history_candle_prices["candles"][-x-1]["mid"]["o"])
+            close = float(history_candle_prices["candles"][-x-1]["mid"]["c"])
+            avg_prices.append(abs(open-close))
+        return float(sum(avg_prices)/num_to_avg)
 
     def begin_trade(self):
         check_trade = True
+        print("Beginning to look for a trade")
+        r = pricing.PricingStream(accountID=self.oanda.accountID, params={"instruments": self.instrument})
         try:
-            r = pricing.PricingStream(accountID=self.oanda.accountID, params={"instruments": self.instrument})
             while True:
                 for tick in self.oanda.client.request(r):
                     now = datetime.datetime.now()
@@ -315,18 +322,18 @@ class Strategy2:
                     minute = str(now.time()).split(":")[1]
                     time.sleep(1)
                     if tick["type"] == "PRICE":
-                        # if int(hour) >= self.trading_open and int(hour)<=self.trading_close:
-                        print("\r" + str(now.time()), self.instrument, end="")
-                        if (int(minute) % 5) == 0:
-                            if check_trade:
-                                print("\nChecking trade @ ", now.time())
-                                self.cfg = {}  # Reset config
-                                self.determine_entry_point(tick)
-                                check_trade = False
-                            else:
-                                check_trade = True
-                        # else:
-                        #     print("\r" + str(now.time()), " - Next defined trading window is at {:02d}:00".format(self.trading_open), end="")
+                        if int(hour) >= self.trading_open and int(hour)<=self.trading_close:
+                            print("\r" + str(now.time()), self.instrument, end="")
+                            if (int(minute) % 5) == 0:
+                                if check_trade:
+                                    print("\nChecking trade @ ", now.time())
+                                    self.cfg = {}  # Reset config
+                                    self.determine_entry_point(tick)
+                                    check_trade = False
+                                else:
+                                    check_trade = True
+                        else:
+                            print("\r" + str(now.time()), " - Next defined trading window is at {:02d}:00".format(self.trading_open), end="")
 
         except Exception as err:
             print("ERROR: ", err)
