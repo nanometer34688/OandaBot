@@ -132,10 +132,9 @@ class Strategy2:
         RSI = rsi_test.wilders_rsi(prices, 14)
         return RSI
 
-    def get_rsi_trend(self):
-        history_prices = self.get_candle_history()
+    def get_rsi_trend(self, history_prices):
         prices = []
-        for price in history_prices["candles"]:
+        for price in history_prices:
             prices.append(float(price["mid"]["c"]))
         RSI_PRICES = self.calculate_RSI(prices)
         rsi_trend = self.get_trend(RSI_PRICES, -2)
@@ -156,7 +155,6 @@ class Strategy2:
         # First candle [-1] is active candle - ignore
         # Second candle [-2] needs to have closed to confirm green/red
         # Third candle [-3] is the candle to check for engulfing status
-        history_prices = history_prices["candles"]
         openBarCurrent = float(history_prices[-2]["mid"]["o"][:-1])  # Open/Close should be the same... but they aren't...
         closeBarCurrent = float(history_prices[-2]["mid"]["c"])
         closeBarPrevious = float(history_prices[-3]["mid"]["c"][:-1])  # Open/Close should be the same... but they aren't...
@@ -177,9 +175,9 @@ class Strategy2:
             return False
 
     def determine_entry_point(self, tick):
-        history_candle_prices = self.get_candle_history()
+        history_candle_prices = self.get_candle_history()["candles"]
         prices = []
-        for price in history_candle_prices["candles"]:
+        for price in history_candle_prices:
             prices.append(float(price["mid"]["c"]))
         engulfing_candle = self.calculate_engulfing_candle(history_candle_prices)
         smma_trend = self.get_smma_trend(prices)
@@ -189,7 +187,7 @@ class Strategy2:
 
         order = None
         self.cfg["price"] = prices[-1]
-        if engulfing_candle == "BUY" and self.get_rsi_trend() == "UPTREND" and smma_trend == "UPTREND" and prices[-1] > self.smma200[-1]:
+        if engulfing_candle == "BUY" and self.get_rsi_trend(history_candle_prices) == "UPTREND" and smma_trend == "UPTREND" and prices[-1] > self.smma200[-1]:
             price = float(tick["asks"][0]["price"])
             stop_loss = float(tick["bids"][0]["price"]) - stop_loss_difference
             take_profit = float(tick["asks"][0]["price"]) + (abs(price - stop_loss) * self.take_profit_ratio)
@@ -207,7 +205,8 @@ class Strategy2:
                 "risk":risk,
                 "stop_loss": stop_loss,
                 "take_profit": take_profit,
-                "units": -units
+                "units": -units,
+                "take_profit_value": risk * self.take_profit_ratio
             }
             self.cfg["decision"] = {
                 "engulfing_candle": engulfing_candle,
@@ -216,7 +215,7 @@ class Strategy2:
                 "smma_200_price": self.smma200[-1]
             }
 
-        elif engulfing_candle == "SELL" and self.get_rsi_trend() == "DOWNTREND" and smma_trend == "DOWNTREND" and prices[-1] < self.smma200[-1]:
+        elif engulfing_candle == "SELL" and self.get_rsi_trend(history_candle_prices) == "DOWNTREND" and smma_trend == "DOWNTREND" and prices[-1] < self.smma200[-1]:
             price = float(tick["bids"][0]["price"])
             stop_loss = float(tick["asks"][0]["price"]) + stop_loss_difference
             take_profit = float(tick["bids"][0]["price"]) - (abs(price - stop_loss) * self.take_profit_ratio)
@@ -337,3 +336,35 @@ class Strategy2:
 
         except Exception as err:
             print("ERROR: ", err)
+
+    def get_candle_history_back_testing(self):
+        from_ts = '2022-07-01T08:00:00Z'
+        candles = self.oanda.get_price_history(from_ts, self.instrument, granularity="M5", num_candles=5000)
+        return candles
+
+    def back_testing(self):
+        all_history_candles = self.get_candle_history_back_testing()["candles"]
+        trading = True
+        BUY_SELL = 1
+        bought_price = 0
+        for x in range(410,len(all_history_candles)):
+            history_candles = all_history_candles[:x]
+            prices = []
+            for price in history_candles:
+                prices.append(float(price["mid"]["c"]))
+            while trading:
+                made_trade = False
+                engulfing_candle = self.calculate_engulfing_candle(history_candles)
+                smma_trend = self.get_smma_trend(prices)
+                if engulfing_candle == "BUY" and self.get_rsi_trend(history_candles) == "UPTREND" and smma_trend == "UPTREND" and prices[-1] > self.smma200[-1]:
+                    print("Bought")
+                    made_trade = True
+                    BUY_SELL = 1
+                elif engulfing_candle == "SELL" and self.get_rsi_trend(history_candles) == "DOWNTREND" and smma_trend == "DOWNTREND" and prices[-1] < self.smma200[-1]:
+                    print("Sold")
+                    made_trade = True
+                    BUY_SELL = -1
+                if made_trade:
+                    bought_price = prices[-1]
+                    trading = False
+          
